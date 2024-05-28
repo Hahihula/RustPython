@@ -1,10 +1,7 @@
 use rustpython_vm as vm;
 use rustpython_vm::function::PosArgs;
 use std::process::ExitCode;
-use vm::{
-    builtins::{PyBool, PyStrRef},
-    Interpreter, PyRef,
-};
+use vm::{builtins::PyStrRef, Interpreter};
 
 fn py_main(interp: &Interpreter) -> vm::PyResult<PyStrRef> {
     interp.enter(|vm| {
