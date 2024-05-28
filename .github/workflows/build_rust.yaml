@@ -52,6 +52,13 @@ jobs:
         run: mkdir -p release
 
       - name: Copy binary to release directory
+        run: 
+        
+        if [ "${{ matrix.os }}" == 'windows-latest' ]; then
+          cp target/release/rustpython.exe release/rustpython-${{ matrix.os }}.exe
+        else
+            cp target/release/rustpython release/rustpython-${{ matrix.os }}
+          fi
         run: cp target/release/rustpython release/rustpython-${{ matrix.os }}
 
       - name: Upload build artifacts
