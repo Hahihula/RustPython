@@ -43,7 +43,7 @@ jobs:
             ${{ runner.os }}-cargo-index
 
       - name: Build
-        run: cargo build --feature ssl --release
+        run: cargo build --features ssl --release
 
       - name: Run tests
         run: cargo test --release
@@ -74,7 +74,7 @@ jobs:
           path: release/rustpython-${{ matrix.os }}.exe
       
       - name: Build IDF example
-        run: cargo build --feature ssl --release --example embeded_idf
+        run: cargo build --features ssl --release --example embeded_idf
 
       - name: Upload IDF example artifact artifacts for POSIX
         uses: actions/upload-artifact@v4
