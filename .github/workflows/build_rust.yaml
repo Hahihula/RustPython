@@ -100,11 +100,15 @@ jobs:
 
       - name: tree directory Windows
         if: matrix.os == 'windows-latest'
-        run: tree /F ./target
+        run: tree /F ./target/release
+
+      - name: tree directory Windows
+        if: matrix.os == 'windows-latest'
+        run: tree /F ./target/release/example
 
       - name: Copy binary to release directory Windows
         if: matrix.os == 'windows-latest'
-        run: cp target\release\example\embeded_idf.exe release\embeded_idf-${{ matrix.os }}.exe
+        run: cp target\release\example\examples\embeded_idf.exe release\embeded_idf-${{ matrix.os }}.exe
 
       - name: Upload IDF example artifact artifacts for Windows
         uses: actions/upload-artifact@v4
