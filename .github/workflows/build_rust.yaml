@@ -83,16 +83,24 @@ jobs:
       - name: Build IDF example
         run: cargo build --features ssl --release --example embeded_idf
 
+      - name: Copy binary to release directory POSIX
+        if: matrix.os != 'windows-latest'
+        run: cp target/release/examples/embeded_idf release/embeded_idf-${{ matrix.os }}
+
       - name: Upload IDF example artifact artifacts for POSIX
         uses: actions/upload-artifact@v4
         if: matrix.os != 'windows-latest'
         with:
           name: embeded_idf
-          path: target/release/examples/embeded_idf
+          path: release/embeded_idf-${{ matrix.os }}
+      
+      - name: Copy binary to release directory Windows
+        if: matrix.os == 'windows-latest'
+        run: cp target/release/example/embeded_idf.exe release/embeded_idf-${{ matrix.os }}.exe
 
       - name: Upload IDF example artifact artifacts for Windows
         uses: actions/upload-artifact@v4
         if: matrix.os == 'windows-latest'
         with:
           name: embeded_idf.exe
-          path: target/release/examples/embeded_idf.exe
+          path: release/embeded_idf-${{ matrix.os }}.exe
