@@ -100,7 +100,7 @@ jobs:
 
       - name: tree directory Windows
         if: matrix.os == 'windows-latest'
-        run: tree /F
+        run: tree /F ./target
 
       - name: Copy binary to release directory Windows
         if: matrix.os == 'windows-latest'
