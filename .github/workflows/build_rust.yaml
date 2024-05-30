@@ -54,7 +54,7 @@ jobs:
             ${{ runner.os }}-cargo-index
 
       - name: Build
-        run: cargo build --features freeze-stdlib ssl-vendor --release
+        run: cargo build --features freeze-stdlib --features ssl-vendor --release --release
 
       - name: Run tests
         run: cargo test --release
@@ -85,7 +85,7 @@ jobs:
           path: release/rustpython-${{ matrix.os }}.exe
       
       - name: Build IDF example
-        run: cargo build --features freeze-stdlib ssl-vendor --release --example embeded_idf
+        run: cargo build --features freeze-stdlib --features ssl-vendor --release --example embeded_idf
 
       - name: Copy binary to release directory POSIX
         if: matrix.os != 'windows-latest'
