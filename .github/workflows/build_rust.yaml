@@ -54,7 +54,7 @@ jobs:
             ${{ runner.os }}-cargo-index
 
       - name: Build
-        run: cargo build --features ssl --release
+        run: cargo build --features freeze-stdlib ssl-vendor --release
 
       - name: Run tests
         run: cargo test --release
@@ -85,7 +85,7 @@ jobs:
           path: release/rustpython-${{ matrix.os }}.exe
       
       - name: Build IDF example
-        run: cargo build --release --example embeded_idf
+        run: cargo build --features freeze-stdlib ssl-vendor --release --example embeded_idf
 
       - name: Copy binary to release directory POSIX
         if: matrix.os != 'windows-latest'
@@ -104,11 +104,11 @@ jobs:
 
       - name: tree directory Windows
         if: matrix.os == 'windows-latest'
-        run: tree /F ./target/release/example
+        run: tree /F ./target/release/examples
 
       - name: Copy binary to release directory Windows
         if: matrix.os == 'windows-latest'
-        run: cp target\release\example\examples\embeded_idf.exe release\embeded_idf-${{ matrix.os }}.exe
+        run: cp target\release\examples\embeded_idf.exe release\embeded_idf-${{ matrix.os }}.exe
 
       - name: Upload IDF example artifact artifacts for Windows
         uses: actions/upload-artifact@v4
