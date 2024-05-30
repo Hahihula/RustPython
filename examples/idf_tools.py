@@ -40,11 +40,9 @@ import json
 import os
 import platform
 import re
-import shutil
 import ssl
 import subprocess
 import sys
-import tarfile
 import tempfile
 import time
 from collections import OrderedDict, namedtuple
@@ -110,6 +108,20 @@ PLATFORM_LINUX64 = 'linux-amd64'
 PLATFORM_LINUX_ARM32 = 'linux-armel'
 PLATFORM_LINUX_ARMHF = 'linux-armhf'
 PLATFORM_LINUX_ARM64 = 'linux-arm64'
+
+def rmtree(directory_path):
+    # Walk through the directory tree from the bottom up
+    for root, dirs, files in os.walk(directory_path, topdown=False):
+        # Remove all files
+        for file in files:
+            file_path = os.path.join(root, file)
+            os.remove(file_path)
+        # Remove all directories
+        for dir in dirs:
+            dir_path = os.path.join(root, dir)
+            os.rmdir(dir_path)
+    # Finally, remove the root directory
+    os.rmdir(directory_path)
 
 
 class Platforms:
@@ -530,7 +542,7 @@ def do_strip_container_dirs(path, levels):  # type: (str, int) -> None
     # move the original directory out of the way (add a .tmp suffix)
     tmp_path = path + '.tmp'
     if os.path.exists(tmp_path):
-        shutil.rmtree(tmp_path)
+        rmtree(tmp_path)
     rename_with_retry(path, tmp_path)
     os.mkdir(path)
     base_path = tmp_path
@@ -548,7 +560,7 @@ def do_strip_container_dirs(path, levels):  # type: (str, int) -> None
         move_from = os.path.join(base_path, name)
         move_to = os.path.join(path, name)
         rename_with_retry(move_from, move_to)
-    shutil.rmtree(tmp_path)
+    rmtree(tmp_path)
 
 
 class ToolNotFound(RuntimeError):
@@ -900,7 +912,7 @@ class IDFTool(object):
         dest_dir = self.get_path_for_version(version)
         if os.path.exists(dest_dir):
             warn('destination path already exists, removing')
-            shutil.rmtree(dest_dir)
+            rmtree(dest_dir)
         mkdir_p(dest_dir)
         unpack(archive_path, dest_dir)
         if self._current_options.strip_container_dirs:  # type: ignore
@@ -2211,7 +2223,7 @@ def action_install_python_env(args):  # type: ignore
 
     if reinstall and os.path.exists(idf_python_env_path):
         warn('Removing the existing Python environment in {}'.format(idf_python_env_path))
-        shutil.rmtree(idf_python_env_path)
+        rmtree(idf_python_env_path)
 
     venv_can_upgrade = False
 
@@ -2478,7 +2490,7 @@ def action_uninstall(args):  # type: (Any) -> None
                     path_to_remove = os.path.join(tools_path, tool, version)
                 else:
                     path_to_remove = os.path.join(tools_path, tool)
-                shutil.rmtree(path_to_remove)
+                rmtree(path_to_remove)
                 info(path_to_remove + ' was removed.')
             except OSError as error:
                 warn(f'{error.filename} can not be removed because {error.strerror}.')
