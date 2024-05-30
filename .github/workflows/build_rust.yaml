@@ -54,7 +54,7 @@ jobs:
             ${{ runner.os }}-cargo-index
 
       - name: Build
-        run: cargo build --features freeze-stdlib --features ssl-vendor --release --release
+        run: cargo build --features freeze-stdlib --features ssl-vendor --release
 
       - name: Run tests
         run: cargo test --release
