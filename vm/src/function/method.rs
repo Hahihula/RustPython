@@ -87,6 +87,21 @@ impl PyMethodDef {
         }
     }
 
+    #[inline]
+    pub const fn new_raw_const(
+        name: &'static str,
+        func: impl PyNativeFn,
+        flags: PyMethodFlags,
+        doc: Option<&'static str>,
+    ) -> Self {
+        Self {
+            name,
+            func: super::static_raw_func(func),
+            flags,
+            doc,
+        }
+    }
+
     pub fn to_proper_method(
         &'static self,
         class: &'static Py<PyType>,
@@ -155,11 +170,8 @@ impl PyMethodDef {
         class: &'static Py<PyType>,
     ) -> PyRef<PyMethodDescriptor> {
         debug_assert!(self.flags.contains(PyMethodFlags::METHOD));
-        PyRef::new_ref(
-            self.to_method(class, ctx),
-            ctx.types.method_descriptor_type.to_owned(),
-            None,
-        )
+        let method = self.to_method(class, ctx);
+        PyRef::new_ref(method, ctx.types.method_descriptor_type.to_owned(), None)
     }
     pub fn build_bound_method(
         &'static self,
@@ -236,7 +248,9 @@ impl std::fmt::Debug for PyMethodDef {
             .field("name", &self.name)
             .field(
                 "func",
-                &(unsafe { std::mem::transmute::<_, [usize; 2]>(self.func)[1] as *const u8 }),
+                &(unsafe {
+                    std::mem::transmute::<&dyn PyNativeFn, [usize; 2]>(self.func)[1] as *const u8
+                }),
             )
             .field("flags", &self.flags)
             .field("doc", &self.doc)

@@ -1,19 +1,23 @@
 [package]
 name = "rustpython-pylib"
-version = "0.3.1"
-authors = ["RustPython Team"]
 description = "A subset of the Python standard library for use with RustPython"
-repository = "https://github.com/RustPython/RustPython"
 license-file = "Lib/PSF-LICENSE"
-edition = "2021"
 include = ["Cargo.toml", "src/**/*.rs", "Lib/", "!Lib/**/test/", "!Lib/**/*.pyc"]
+authors = ["CPython Developers"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
 
 [features]
 freeze-stdlib = []
 
 [dependencies]
 rustpython-compiler-core = { workspace = true }
-rustpython-derive = { version = "0.3.1", path = "../derive" }
+rustpython-derive = { version = "0.4.0", path = "../derive" }
 
 [build-dependencies]
 glob = { workspace = true }
+
+[lints]
+workspace = true

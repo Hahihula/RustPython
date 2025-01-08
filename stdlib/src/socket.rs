@@ -337,13 +337,12 @@ mod _socket {
             target_os = "linux",
             any(
                 target_arch = "aarch64",
-                target_arch = "i686",
+                target_arch = "x86",
                 target_arch = "loongarch64",
                 target_arch = "mips",
                 target_arch = "powerpc",
                 target_arch = "powerpc64",
-                target_arch = "powerpc64le",
-                target_arch = "riscv64gc",
+                target_arch = "riscv64",
                 target_arch = "s390x",
                 target_arch = "x86_64"
             )
@@ -388,13 +387,12 @@ mod _socket {
             target_os = "linux",
             any(
                 target_arch = "aarch64",
-                target_arch = "i686",
+                target_arch = "x86",
                 target_arch = "loongarch64",
                 target_arch = "mips",
                 target_arch = "powerpc",
                 target_arch = "powerpc64",
-                target_arch = "powerpc64le",
-                target_arch = "riscv64gc",
+                target_arch = "riscv64",
                 target_arch = "s390x",
                 target_arch = "x86_64"
             )
@@ -1844,15 +1842,16 @@ mod _socket {
         #[cfg(unix)]
         {
             use nix::poll::*;
+            use std::os::fd::AsFd;
             let events = match kind {
                 SelectKind::Read => PollFlags::POLLIN,
                 SelectKind::Write => PollFlags::POLLOUT,
                 SelectKind::Connect => PollFlags::POLLOUT | PollFlags::POLLERR,
             };
-            let mut pollfd = [PollFd::new(sock, events)];
+            let mut pollfd = [PollFd::new(sock.as_fd(), events)];
             let timeout = match interval {
-                Some(d) => d.as_millis() as _,
-                None => -1,
+                Some(d) => d.try_into().unwrap_or(PollTimeout::MAX),
+                None => PollTimeout::NONE,
             };
             let ret = poll(&mut pollfd, timeout)?;
             Ok(ret == 0)
@@ -2218,7 +2217,7 @@ mod _socket {
                 fn as_slice(&self) -> &[netioapi::MIB_IF_ROW2] {
                     unsafe {
                         let p = self.ptr.as_ptr();
-                        let ptr = ptr::addr_of!((*p).Table) as *const netioapi::MIB_IF_ROW2;
+                        let ptr = &raw const (*p).Table as *const netioapi::MIB_IF_ROW2;
                         std::slice::from_raw_parts(ptr, (*p).NumEntries as usize)
                     }
                 }

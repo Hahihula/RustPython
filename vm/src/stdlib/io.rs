@@ -15,7 +15,7 @@ use crate::{
     convert::{IntoPyException, ToPyException},
     PyObjectRef, PyRef, PyResult, TryFromObject, VirtualMachine,
 };
-pub use _io::io_open as open;
+pub use _io::{io_open as open, OpenArgs};
 
 impl ToPyException for std::io::Error {
     fn to_pyexception(&self, vm: &VirtualMachine) -> PyBaseExceptionRef {
@@ -68,7 +68,6 @@ pub(crate) fn make_module(vm: &VirtualMachine) -> PyRef<PyModule> {
 }
 
 // not used on all platforms
-#[allow(unused)]
 #[derive(Copy, Clone)]
 #[repr(transparent)]
 pub struct Fildes(pub i32);
@@ -100,13 +99,28 @@ impl TryFromObject for Fildes {
     }
 }
 
+#[cfg(unix)]
+impl std::os::fd::AsFd for Fildes {
+    fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+        // SAFETY: none, really. but, python's os api of passing around file descriptors
+        //         everywhere isn't really io-safe anyway, so, this is passed to the user.
+        unsafe { std::os::fd::BorrowedFd::borrow_raw(self.0) }
+    }
+}
+#[cfg(unix)]
+impl std::os::fd::AsRawFd for Fildes {
+    fn as_raw_fd(&self) -> std::os::fd::RawFd {
+        self.0
+    }
+}
+
 #[pymodule]
 mod _io {
     use super::*;
     use crate::{
         builtins::{
             PyBaseExceptionRef, PyByteArray, PyBytes, PyBytesRef, PyIntRef, PyMemoryView, PyStr,
-            PyStrRef, PyType, PyTypeRef,
+            PyStrRef, PyTuple, PyTupleRef, PyType, PyTypeRef,
         },
         class::StaticType,
         common::lock::{
@@ -134,6 +148,7 @@ mod _io {
     use malachite_bigint::{BigInt, BigUint};
     use num_traits::ToPrimitive;
     use std::{
+        borrow::Cow,
         io::{self, prelude::*, Cursor, SeekFrom},
         ops::Range,
     };
@@ -244,11 +259,8 @@ mod _io {
 
         fn write(&mut self, data: &[u8]) -> Option<u64> {
             let length = data.len();
-
-            match self.cursor.write_all(data) {
-                Ok(_) => Some(length as u64),
-                Err(_) => None,
-            }
+            self.cursor.write_all(data).ok()?;
+            Some(length as u64)
         }
 
         //return the entire contents of the underlying
@@ -891,7 +903,8 @@ mod _io {
         }
 
         fn raw_tell(&mut self, vm: &VirtualMachine) -> PyResult<Offset> {
-            let ret = vm.call_method(self.check_init(vm)?, "tell", ())?;
+            let raw = self.check_init(vm)?;
+            let ret = vm.call_method(raw, "tell", ())?;
             let offset = get_offset(ret, vm)?;
             if offset < 0 {
                 return Err(
@@ -1474,7 +1487,14 @@ mod _io {
         #[pymethod]
         fn tell(&self, vm: &VirtualMachine) -> PyResult<Offset> {
             let mut data = self.lock(vm)?;
-            Ok(data.raw_tell(vm)? - data.raw_offset())
+            let raw_tell = data.raw_tell(vm)?;
+            let raw_offset = data.raw_offset();
+            let mut pos = raw_tell - raw_offset;
+            // GH-95782
+            if pos < 0 {
+                pos = 0;
+            }
+            Ok(pos)
         }
         #[pymethod]
         fn truncate(
@@ -1868,17 +1888,16 @@ mod _io {
 
     #[derive(FromArgs)]
     struct TextIOWrapperArgs {
-        buffer: PyObjectRef,
         #[pyarg(any, default)]
         encoding: Option<PyStrRef>,
         #[pyarg(any, default)]
         errors: Option<PyStrRef>,
         #[pyarg(any, default)]
-        newline: Newlines,
-        #[pyarg(any, default = "false")]
-        line_buffering: bool,
-        #[pyarg(any, default = "false")]
-        write_through: bool,
+        newline: Option<Newlines>,
+        #[pyarg(any, default)]
+        line_buffering: Option<bool>,
+        #[pyarg(any, default)]
+        write_through: Option<bool>,
     }
 
     #[derive(Debug, Copy, Clone, Default)]
@@ -2196,9 +2215,13 @@ mod _io {
     impl DefaultConstructor for TextIOWrapper {}
 
     impl Initializer for TextIOWrapper {
-        type Args = TextIOWrapperArgs;
+        type Args = (PyObjectRef, TextIOWrapperArgs);
 
-        fn init(zelf: PyRef<Self>, args: Self::Args, vm: &VirtualMachine) -> PyResult<()> {
+        fn init(
+            zelf: PyRef<Self>,
+            (buffer, args): Self::Args,
+            vm: &VirtualMachine,
+        ) -> PyResult<()> {
             let mut data = zelf.lock_opt(vm)?;
             *data = None;
 
@@ -2218,37 +2241,12 @@ mod _io {
                 .errors
                 .unwrap_or_else(|| PyStr::from("strict").into_ref(&vm.ctx));
 
-            let buffer = args.buffer;
-
             let has_read1 = vm.get_attribute_opt(buffer.clone(), "read1")?.is_some();
             let seekable = vm.call_method(&buffer, "seekable", ())?.try_to_bool(vm)?;
 
-            let codec = vm.state.codec_registry.lookup(encoding.as_str(), vm)?;
-
-            let encoder = if vm.call_method(&buffer, "writable", ())?.try_to_bool(vm)? {
-                let incremental_encoder =
-                    codec.get_incremental_encoder(Some(errors.clone()), vm)?;
-                let encoding_name = vm.get_attribute_opt(incremental_encoder.clone(), "name")?;
-                let encodefunc = encoding_name.and_then(|name| {
-                    let name = name.payload::<PyStr>()?;
-                    match name.as_str() {
-                        "utf-8" => Some(textio_encode_utf8 as EncodeFunc),
-                        _ => None,
-                    }
-                });
-                Some((incremental_encoder, encodefunc))
-            } else {
-                None
-            };
-
-            let decoder = if vm.call_method(&buffer, "readable", ())?.try_to_bool(vm)? {
-                let incremental_decoder =
-                    codec.get_incremental_decoder(Some(errors.clone()), vm)?;
-                // TODO: wrap in IncrementalNewlineDecoder if newlines == Universal | Passthrough
-                Some(incremental_decoder)
-            } else {
-                None
-            };
+            let newline = args.newline.unwrap_or_default();
+            let (encoder, decoder) =
+                Self::find_coder(&buffer, encoding.as_str(), &errors, newline, vm)?;
 
             *data = Some(TextIOData {
                 buffer,
@@ -2256,9 +2254,9 @@ mod _io {
                 decoder,
                 encoding,
                 errors,
-                newline: args.newline,
-                line_buffering: args.line_buffering,
-                write_through: args.write_through,
+                newline,
+                line_buffering: args.line_buffering.unwrap_or_default(),
+                write_through: args.write_through.unwrap_or_default(),
                 chunk_size: 8192,
                 seekable,
                 has_read1,
@@ -2290,10 +2288,88 @@ mod _io {
             PyThreadMutexGuard::try_map(lock, |x| x.as_mut())
                 .map_err(|_| vm.new_value_error("I/O operation on uninitialized object".to_owned()))
         }
+
+        #[allow(clippy::type_complexity)]
+        fn find_coder(
+            buffer: &PyObject,
+            encoding: &str,
+            errors: &Py<PyStr>,
+            newline: Newlines,
+            vm: &VirtualMachine,
+        ) -> PyResult<(
+            Option<(PyObjectRef, Option<EncodeFunc>)>,
+            Option<PyObjectRef>,
+        )> {
+            let codec = vm.state.codec_registry.lookup(encoding, vm)?;
+
+            let encoder = if vm.call_method(buffer, "writable", ())?.try_to_bool(vm)? {
+                let incremental_encoder =
+                    codec.get_incremental_encoder(Some(errors.to_owned()), vm)?;
+                let encoding_name = vm.get_attribute_opt(incremental_encoder.clone(), "name")?;
+                let encodefunc = encoding_name.and_then(|name| {
+                    let name = name.payload::<PyStr>()?;
+                    match name.as_str() {
+                        "utf-8" => Some(textio_encode_utf8 as EncodeFunc),
+                        _ => None,
+                    }
+                });
+                Some((incremental_encoder, encodefunc))
+            } else {
+                None
+            };
+
+            let decoder = if vm.call_method(buffer, "readable", ())?.try_to_bool(vm)? {
+                let decoder = codec.get_incremental_decoder(Some(errors.to_owned()), vm)?;
+                if let Newlines::Universal | Newlines::Passthrough = newline {
+                    let args = IncrementalNewlineDecoderArgs {
+                        decoder,
+                        translate: matches!(newline, Newlines::Universal),
+                        errors: None,
+                    };
+                    Some(IncrementalNewlineDecoder::construct_and_init(args, vm)?.into())
+                } else {
+                    Some(decoder)
+                }
+            } else {
+                None
+            };
+            Ok((encoder, decoder))
+        }
     }
 
     #[pyclass(with(Constructor, Initializer), flags(BASETYPE))]
     impl TextIOWrapper {
+        #[pymethod]
+        fn reconfigure(&self, args: TextIOWrapperArgs, vm: &VirtualMachine) -> PyResult<()> {
+            let mut data = self.data.lock().unwrap();
+            if let Some(data) = data.as_mut() {
+                if let Some(encoding) = args.encoding {
+                    let (encoder, decoder) = Self::find_coder(
+                        &data.buffer,
+                        encoding.as_str(),
+                        &data.errors,
+                        data.newline,
+                        vm,
+                    )?;
+                    data.encoding = encoding;
+                    data.encoder = encoder;
+                    data.decoder = decoder;
+                }
+                if let Some(errors) = args.errors {
+                    data.errors = errors;
+                }
+                if let Some(newline) = args.newline {
+                    data.newline = newline;
+                }
+                if let Some(line_buffering) = args.line_buffering {
+                    data.line_buffering = line_buffering;
+                }
+                if let Some(write_through) = args.write_through {
+                    data.write_through = write_through;
+                }
+            }
+            Ok(())
+        }
         #[pymethod]
         fn seekable(&self, vm: &VirtualMachine) -> PyResult {
             let textio = self.lock(vm)?;
@@ -2308,6 +2384,25 @@ mod _io {
         fn writable(&self, vm: &VirtualMachine) -> PyResult {
             let textio = self.lock(vm)?;
             vm.call_method(&textio.buffer, "writable", ())
+        }
+
+        #[pygetset]
+        fn line_buffering(&self, vm: &VirtualMachine) -> PyResult<bool> {
+            Ok(self.lock(vm)?.line_buffering)
+        }
+
+        #[pygetset]
+        fn write_through(&self, vm: &VirtualMachine) -> PyResult<bool> {
+            Ok(self.lock(vm)?.write_through)
+        }
+
+        #[pygetset]
+        fn newlines(&self, vm: &VirtualMachine) -> PyResult<Option<PyObjectRef>> {
+            let data = self.lock(vm)?;
+            let Some(decoder) = &data.decoder else {
+                return Ok(None);
+            };
+            vm.get_attribute_opt(decoder.clone(), "newlines")
         }
 
         #[pygetset(name = "_CHUNK_SIZE")]
@@ -2655,15 +2750,13 @@ mod _io {
             let data = obj.as_str();
 
             let replace_nl = match textio.newline {
+                Newlines::Lf => Some("\n"),
                 Newlines::Cr => Some("\r"),
                 Newlines::Crlf => Some("\r\n"),
+                Newlines::Universal if cfg!(windows) => Some("\r\n"),
                 _ => None,
             };
-            let has_lf = if replace_nl.is_some() || textio.line_buffering {
-                data.contains('\n')
-            } else {
-                false
-            };
+            let has_lf = (replace_nl.is_some() || textio.line_buffering) && data.contains('\n');
             let flush = textio.line_buffering && (has_lf || data.contains('\r'));
             let chunk = if let Some(replace_nl) = replace_nl {
                 if has_lf {
@@ -3059,6 +3152,229 @@ mod _io {
                 s.push_str(append.as_str())
             }
             PyStr::from(s).into_ref(&vm.ctx)
+        }
+    }
+
+    #[pyattr]
+    #[pyclass(name)]
+    #[derive(Debug, PyPayload, Default)]
+    struct IncrementalNewlineDecoder {
+        // TODO: Traverse
+        data: PyThreadMutex<Option<IncrementalNewlineDecoderData>>,
+    }
+
+    #[derive(Debug)]
+    struct IncrementalNewlineDecoderData {
+        decoder: PyObjectRef,
+        // afaict, this is used for nothing
+        // errors: PyObjectRef,
+        pendingcr: bool,
+        translate: bool,
+        seennl: SeenNewline,
+    }
+
+    bitflags! {
+        #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+        struct SeenNewline: u8 {
+            const LF = 1;
+            const CR = 2;
+            const CRLF = 4;
+        }
+    }
+
+    impl DefaultConstructor for IncrementalNewlineDecoder {}
+
+    #[derive(FromArgs)]
+    struct IncrementalNewlineDecoderArgs {
+        #[pyarg(any)]
+        decoder: PyObjectRef,
+        #[pyarg(any)]
+        translate: bool,
+        #[pyarg(any, default)]
+        errors: Option<PyObjectRef>,
+    }
+
+    impl Initializer for IncrementalNewlineDecoder {
+        type Args = IncrementalNewlineDecoderArgs;
+        fn init(zelf: PyRef<Self>, args: Self::Args, vm: &VirtualMachine) -> PyResult<()> {
+            let _ = args.errors;
+            let mut data = zelf.lock_opt(vm)?;
+            *data = Some(IncrementalNewlineDecoderData {
+                decoder: args.decoder,
+                translate: args.translate,
+                pendingcr: false,
+                seennl: SeenNewline::empty(),
+            });
+            Ok(())
+        }
+    }
+
+    #[pyclass(with(Constructor, Initializer))]
+    impl IncrementalNewlineDecoder {
+        fn lock_opt(
+            &self,
+            vm: &VirtualMachine,
+        ) -> PyResult<PyThreadMutexGuard<Option<IncrementalNewlineDecoderData>>> {
+            self.data
+                .lock()
+                .ok_or_else(|| vm.new_runtime_error("reentrant call inside nldecoder".to_owned()))
+        }
+
+        fn lock(
+            &self,
+            vm: &VirtualMachine,
+        ) -> PyResult<PyMappedThreadMutexGuard<IncrementalNewlineDecoderData>> {
+            let lock = self.lock_opt(vm)?;
+            PyThreadMutexGuard::try_map(lock, |x| x.as_mut()).map_err(|_| {
+                vm.new_value_error("I/O operation on uninitialized nldecoder".to_owned())
+            })
+        }
+
+        #[pymethod]
+        fn decode(&self, args: NewlineDecodeArgs, vm: &VirtualMachine) -> PyResult<PyStrRef> {
+            self.lock(vm)?.decode(args.input, args.r#final, vm)
+        }
+
+        #[pymethod]
+        fn getstate(&self, vm: &VirtualMachine) -> PyResult<(PyObjectRef, u64)> {
+            let data = self.lock(vm)?;
+            let (buffer, flag) = if vm.is_none(&data.decoder) {
+                (vm.ctx.new_bytes(vec![]).into(), 0)
+            } else {
+                vm.call_method(&data.decoder, "getstate", ())?
+                    .try_to_ref::<PyTuple>(vm)?
+                    .extract_tuple::<(PyObjectRef, u64)>(vm)?
+            };
+            let flag = (flag << 1) | (data.pendingcr as u64);
+            Ok((buffer, flag))
+        }
+
+        #[pymethod]
+        fn setstate(&self, state: PyTupleRef, vm: &VirtualMachine) -> PyResult<()> {
+            let mut data = self.lock(vm)?;
+            let (buffer, flag) = state.extract_tuple::<(PyObjectRef, u64)>(vm)?;
+            data.pendingcr = flag & 1 != 0;
+            if !vm.is_none(&data.decoder) {
+                vm.call_method(&data.decoder, "setstate", ((buffer, flag >> 1),))?;
+            }
+            Ok(())
+        }
+
+        #[pymethod]
+        fn reset(&self, vm: &VirtualMachine) -> PyResult<()> {
+            let mut data = self.lock(vm)?;
+            data.seennl = SeenNewline::empty();
+            data.pendingcr = false;
+            if !vm.is_none(&data.decoder) {
+                vm.call_method(&data.decoder, "reset", ())?;
+            }
+            Ok(())
+        }
+
+        #[pygetset]
+        fn newlines(&self, vm: &VirtualMachine) -> PyResult {
+            let data = self.lock(vm)?;
+            Ok(match data.seennl.bits() {
+                1 => "\n".to_pyobject(vm),
+                2 => "\r".to_pyobject(vm),
+                3 => ("\r", "\n").to_pyobject(vm),
+                4 => "\r\n".to_pyobject(vm),
+                5 => ("\n", "\r\n").to_pyobject(vm),
+                6 => ("\r", "\r\n").to_pyobject(vm),
+                7 => ("\r", "\n", "\r\n").to_pyobject(vm),
+                _ => vm.ctx.none(),
+            })
+        }
+    }
+
+    #[derive(FromArgs)]
+    struct NewlineDecodeArgs {
+        #[pyarg(any)]
+        input: PyObjectRef,
+        #[pyarg(any, default)]
+        r#final: bool,
+    }
+
+    impl IncrementalNewlineDecoderData {
+        fn decode(
+            &mut self,
+            input: PyObjectRef,
+            final_: bool,
+            vm: &VirtualMachine,
+        ) -> PyResult<PyStrRef> {
+            let output = if vm.is_none(&self.decoder) {
+                input
+            } else {
+                vm.call_method(&self.decoder, "decode", (input, final_))?
+            };
+            let orig_output: PyStrRef = output.try_into_value(vm)?;
+            // this being Cow::Owned means we need to allocate a new string
+            let mut output = Cow::Borrowed(orig_output.as_str());
+            if self.pendingcr && (final_ || !output.is_empty()) {
+                output = ["\r", &*output].concat().into();
+                self.pendingcr = false;
+            }
+            if !final_ {
+                if let Some(s) = output.strip_suffix('\r') {
+                    output = s.to_owned().into();
+                    self.pendingcr = true;
+                }
+            }
+
+            if output.is_empty() {
+                return Ok(vm.ctx.empty_str.to_owned());
+            }
+
+            if (self.seennl == SeenNewline::LF || self.seennl.is_empty()) && !output.contains('\r')
+            {
+                if self.seennl.is_empty() && output.contains('\n') {
+                    self.seennl.insert(SeenNewline::LF);
+                }
+            } else if !self.translate {
+                let mut matches = output.match_indices(['\r', '\n']);
+                while !self.seennl.is_all() {
+                    let Some((i, c)) = matches.next() else { break };
+                    match c {
+                        "\n" => self.seennl.insert(SeenNewline::LF),
+                        // if c isn't \n, it can only be \r
+                        _ if output[i + 1..].starts_with('\n') => {
+                            matches.next();
+                            self.seennl.insert(SeenNewline::CRLF);
+                        }
+                        _ => self.seennl.insert(SeenNewline::CR),
+                    }
+                }
+            } else {
+                let mut chunks = output.match_indices(['\r', '\n']);
+                let mut new_string = String::with_capacity(output.len());
+                let mut last_modification_index = 0;
+                while let Some((cr_index, chunk)) = chunks.next() {
+                    if chunk == "\r" {
+                        // skip copying the CR
+                        let mut next_chunk_index = cr_index + 1;
+                        if output[cr_index + 1..].starts_with('\n') {
+                            chunks.next();
+                            self.seennl.insert(SeenNewline::CRLF);
+                            // skip the LF too
+                            next_chunk_index += 1;
+                        } else {
+                            self.seennl.insert(SeenNewline::CR);
+                        }
+                        new_string.push_str(&output[last_modification_index..cr_index]);
+                        new_string.push('\n');
+                        last_modification_index = next_chunk_index;
+                    } else {
+                        self.seennl.insert(SeenNewline::LF);
+                    }
+                }
+                new_string.push_str(&output[last_modification_index..]);
+                output = new_string.into();
+            }
+
+            Ok(match output {
+                Cow::Borrowed(_) => orig_output,
+                Cow::Owned(s) => vm.ctx.new_str(s),
+            })
         }
     }
 
@@ -3504,17 +3820,17 @@ mod _io {
     #[derive(FromArgs)]
     pub struct OpenArgs {
         #[pyarg(any, default = "-1")]
-        buffering: isize,
+        pub buffering: isize,
         #[pyarg(any, default)]
-        encoding: Option<PyStrRef>,
+        pub encoding: Option<PyStrRef>,
         #[pyarg(any, default)]
-        errors: Option<PyStrRef>,
+        pub errors: Option<PyStrRef>,
         #[pyarg(any, default)]
-        newline: Option<PyStrRef>,
+        pub newline: Option<PyStrRef>,
         #[pyarg(any, default = "true")]
-        closefd: bool,
+        pub closefd: bool,
         #[pyarg(any, default)]
-        opener: Option<PyObjectRef>,
+        pub opener: Option<PyObjectRef>,
     }
     impl Default for OpenArgs {
         fn default() -> Self {

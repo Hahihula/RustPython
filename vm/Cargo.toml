@@ -1,15 +1,16 @@
 [package]
 name = "rustpython-vm"
-version = "0.3.1"
 description = "RustPython virtual machine."
-authors = ["RustPython Team"]
-repository = "https://github.com/RustPython/RustPython"
-license = "MIT"
-edition = "2021"
 include = ["src/**/*.rs", "Cargo.toml", "build.rs", "Lib/**/*.py"]
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
 
 [features]
-default = ["compiler"]
+default = ["compiler", "wasmbind"]
 importlib = []
 encodings = ["importlib"]
 vm-tracing-logging = []
@@ -22,6 +23,7 @@ ast = ["rustpython-ast"]
 codegen = ["rustpython-codegen", "ast"]
 parser = ["rustpython-parser", "ast"]
 serde = ["dep:serde"]
+wasmbind = ["chrono/wasmbind", "getrandom/js", "wasm-bindgen"]
 
 [dependencies]
 rustpython-compiler = { workspace = true, optional = true }
@@ -40,13 +42,13 @@ rustpython-sre_engine = { workspace = true }
 
 ascii = { workspace = true }
 ahash = { workspace = true }
-atty = { workspace = true }
 bitflags = { workspace = true }
 bstr = { workspace = true }
 cfg-if = { workspace = true }
 crossbeam-utils = { workspace = true }
 chrono = { workspace = true, features = ["wasmbind"] }
 flame = { workspace = true, optional = true }
+getrandom = { workspace = true }
 hex = { workspace = true }
 indexmap = { workspace = true }
 itertools = { workspace = true }
@@ -65,17 +67,18 @@ paste = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true, optional = true }
 static_assertions = { workspace = true }
+strum = { workspace = true }
+strum_macros = { workspace = true }
 thiserror = { workspace = true }
 thread_local = { workspace = true }
 memchr = { workspace = true }
 
-caseless = "0.2.1"
-getrandom = { version = "0.2.12", features = ["js"] }
+caseless = "0.2.2"
 flamer = { version = "0.4", optional = true }
-half = "1.8.2"
+half = "2"
 memoffset = "0.9.1"
 optional = "0.5.0"
-result-like = "0.4.6"
+result-like = "0.5.0"
 timsort = "0.1.2"
 
 ## unicode stuff
@@ -89,14 +92,13 @@ unic-ucd-category  = "0.9.0"
 unic-ucd-ident     = "0.9.0"
 
 [target.'cfg(unix)'.dependencies]
+rustix = { workspace = true }
 exitcode = "1.1.2"
 uname = "0.1.1"
-strum = "0.24.0"
-strum_macros = "0.24.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rustyline = { workspace = true }
-which = "4.2.5"
+which = "6"
 
 [target.'cfg(any(not(target_arch = "wasm32"), target_os = "wasi"))'.dependencies]
 num_cpus = "1.13.1"
@@ -105,7 +107,7 @@ num_cpus = "1.13.1"
 junction = { workspace = true }
 schannel = { workspace = true }
 widestring = { workspace = true }
-winreg = "0.10.1"
+winreg = "0.52"
 
 [target.'cfg(windows)'.dependencies.windows]
 version = "0.52.0"
@@ -139,10 +141,14 @@ features = [
   "Win32_UI_WindowsAndMessaging",
 ]
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = "0.2.92"
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+wasm-bindgen = { workspace = true, optional = true }
+getrandom = { workspace = true, features = ["custom"] }
 
 [build-dependencies]
 glob = { workspace = true }
 itertools = { workspace = true }
 rustc_version = "0.4.0"
+
+[lints]
+workspace = true

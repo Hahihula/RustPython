@@ -379,7 +379,7 @@ mod _ssl {
     #[pyfunction(name = "RAND_add")]
     fn rand_add(string: ArgStrOrBytesLike, entropy: f64) {
         let f = |b: &[u8]| {
-            for buf in b.chunks(libc::c_int::max_value() as usize) {
+            for buf in b.chunks(libc::c_int::MAX as usize) {
                 unsafe { sys::RAND_add(buf.as_ptr() as *const _, buf.len() as _, entropy) }
             }
         };
@@ -700,12 +700,14 @@ mod _ssl {
             vm: &VirtualMachine,
         ) -> PyResult<Vec<PyObjectRef>> {
             let binary_form = binary_form.unwrap_or(false);
-            let certs = self
-                .ctx()
-                .cert_store()
-                .all_certificates()
-                .iter()
-                .map(|cert| cert_to_py(vm, cert, binary_form))
+            let ctx = self.ctx();
+            #[cfg(ossl300)]
+            let certs = ctx.cert_store().all_certificates();
+            #[cfg(not(ossl300))]
+            let certs = ctx.cert_store().objects().iter().filter_map(|x| x.x509());
+            let certs = certs
+                .into_iter()
+                .map(|ref cert| cert_to_py(vm, cert, binary_form))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(certs)
         }
@@ -1501,7 +1503,7 @@ mod bio {
 
     pub struct MemBioSlice<'a>(*mut sys::BIO, PhantomData<&'a [u8]>);
 
-    impl<'a> Drop for MemBioSlice<'a> {
+    impl Drop for MemBioSlice<'_> {
         fn drop(&mut self) {
             unsafe {
                 sys::BIO_free_all(self.0);
@@ -1513,7 +1515,7 @@ mod bio {
         pub fn new(buf: &'a [u8]) -> Result<MemBioSlice<'a>, ErrorStack> {
             openssl::init();
 
-            assert!(buf.len() <= c_int::max_value() as usize);
+            assert!(buf.len() <= c_int::MAX as usize);
             let bio = unsafe { sys::BIO_new_mem_buf(buf.as_ptr() as *const _, buf.len() as c_int) };
             if bio.is_null() {
                 return Err(ErrorStack::get());

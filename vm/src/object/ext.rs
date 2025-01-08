@@ -494,25 +494,27 @@ impl PyObject {
 
 /// A borrow of a reference to a Python object. This avoids having clone the `PyRef<T>`/
 /// `PyObjectRef`, which isn't that cheap as that increments the atomic reference counter.
+// TODO: check if we still need this
+#[allow(dead_code)]
 pub struct PyLease<'a, T: PyObjectPayload> {
     inner: PyRwLockReadGuard<'a, PyRef<T>>,
 }
 
-impl<'a, T: PyObjectPayload + PyPayload> PyLease<'a, T> {
+impl<T: PyObjectPayload + PyPayload> PyLease<'_, T> {
     #[inline(always)]
     pub fn into_owned(self) -> PyRef<T> {
         self.inner.clone()
     }
 }
 
-impl<'a, T: PyObjectPayload + PyPayload> Borrow<PyObject> for PyLease<'a, T> {
+impl<T: PyObjectPayload + PyPayload> Borrow<PyObject> for PyLease<'_, T> {
     #[inline(always)]
     fn borrow(&self) -> &PyObject {
         self.inner.as_ref()
     }
 }
 
-impl<'a, T: PyObjectPayload + PyPayload> Deref for PyLease<'a, T> {
+impl<T: PyObjectPayload + PyPayload> Deref for PyLease<'_, T> {
     type Target = PyRef<T>;
     #[inline(always)]
     fn deref(&self) -> &Self::Target {
@@ -520,7 +522,7 @@ impl<'a, T: PyObjectPayload + PyPayload> Deref for PyLease<'a, T> {
     }
 }
 
-impl<'a, T> fmt::Display for PyLease<'a, T>
+impl<T> fmt::Display for PyLease<'_, T>
 where
     T: PyPayload + fmt::Display,
 {

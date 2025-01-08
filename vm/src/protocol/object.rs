@@ -118,9 +118,8 @@ impl PyObject {
             .class()
             .mro_find_map(|cls| cls.slots.getattro.load())
             .unwrap();
-        getattro(self, attr_name, vm).map_err(|exc| {
-            vm.set_attribute_error_context(&exc, self.to_owned(), attr_name.to_owned());
-            exc
+        getattro(self, attr_name, vm).inspect_err(|exc| {
+            vm.set_attribute_error_context(exc, self.to_owned(), attr_name.to_owned());
         })
     }
 
@@ -564,8 +563,8 @@ impl PyObject {
     }
 
     // int PyObject_TypeCheck(PyObject *o, PyTypeObject *type)
-    pub fn type_check(&self, typ: PyTypeRef) -> bool {
-        self.fast_isinstance(&typ)
+    pub fn type_check(&self, typ: &Py<PyType>) -> bool {
+        self.fast_isinstance(typ)
     }
 
     pub fn length_opt(&self, vm: &VirtualMachine) -> Option<PyResult<usize>> {

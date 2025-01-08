@@ -1,6 +1,6 @@
 use super::{PyStr, PyStrInterned, PyType};
 use crate::{
-    builtins::{builtin_func::PyNativeMethod, type_},
+    builtins::{builtin_func::PyNativeMethod, type_, PyTypeRef},
     class::PyClassImpl,
     function::{FuncArgs, PyMethodDef, PyMethodFlags, PySetterValue},
     types::{Callable, GetDescriptor, Representable, Unconstructible},
@@ -27,6 +27,7 @@ pub struct PyMethodDescriptor {
     pub common: PyDescriptor,
     pub method: &'static PyMethodDef,
     // vectorcall: vectorcallfunc,
+    pub objclass: &'static Py<PyType>, // TODO: move to tp_members
 }
 
 impl PyMethodDescriptor {
@@ -38,6 +39,7 @@ impl PyMethodDescriptor {
                 qualname: PyRwLock::new(None),
             },
             method,
+            objclass: typ,
         }
     }
 }
@@ -125,6 +127,10 @@ impl PyMethodDescriptor {
             type_::get_text_signature_from_internal_doc(self.method.name, doc)
                 .map(|signature| signature.to_string())
         })
+    }
+    #[pygetset(magic)]
+    fn objclass(&self) -> PyTypeRef {
+        self.objclass.to_owned()
     }
     #[pymethod(magic)]
     fn reduce(
@@ -314,10 +320,13 @@ fn set_slot_at_object(
                 PySetterValue::Delete => obj.set_slot(offset, None),
             };
         }
-        MemberKind::ObjectEx => match value {
-            PySetterValue::Assign(v) => obj.set_slot(offset, Some(v)),
-            PySetterValue::Delete => obj.set_slot(offset, None),
-        },
+        MemberKind::ObjectEx => {
+            let value = match value {
+                PySetterValue::Assign(v) => Some(v),
+                PySetterValue::Delete => None,
+            };
+            obj.set_slot(offset, value);
+        }
     }
 
     Ok(())

@@ -1,6 +1,7 @@
 // to allow `mod foo {}` in foo.rs; clippy thinks this is a mistake/misunderstanding of
 // how `mod` works, but we want this sometimes for pymodule declarations
 #![allow(clippy::module_inception)]
+#![cfg_attr(target_os = "redox", feature(raw_ref_op))]
 
 #[macro_use]
 extern crate rustpython_derive;
@@ -43,7 +44,6 @@ mod syslog;
 mod unicodedata;
 mod zlib;
 
-#[cfg(not(target_arch = "wasm32"))]
 mod faulthandler;
 #[cfg(any(unix, target_os = "wasi"))]
 mod fcntl;
@@ -62,7 +62,10 @@ mod resource;
 mod scproxy;
 #[cfg(any(unix, windows, target_os = "wasi"))]
 mod select;
-#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "sqlite",
+    not(any(target_os = "android", target_arch = "wasm32"))
+))]
 mod sqlite;
 #[cfg(all(not(target_arch = "wasm32"), feature = "ssl"))]
 mod ssl;
@@ -109,6 +112,7 @@ pub fn get_module_inits() -> impl Iterator<Item = (Cow<'static, str>, StdlibInit
             "_contextvars" => contextvars::make_module,
             "_csv" => csv::make_module,
             "_dis" => dis::make_module,
+            "faulthandler" => faulthandler::make_module,
             "gc" => gc::make_module,
             "_hashlib" => hashlib::make_module,
             "_sha1" => sha1::make_module,
@@ -140,9 +144,8 @@ pub fn get_module_inits() -> impl Iterator<Item = (Cow<'static, str>, StdlibInit
         {
             "_multiprocessing" => multiprocessing::make_module,
             "_socket" => socket::make_module,
-            "faulthandler" => faulthandler::make_module,
         }
-        #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
+        #[cfg(all(feature = "sqlite", not(any(target_os = "android", target_arch = "wasm32"))))]
         {
             "_sqlite3" => sqlite::make_module,
         }

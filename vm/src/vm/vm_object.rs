@@ -13,13 +13,21 @@ impl VirtualMachine {
     #[track_caller]
     #[cold]
     fn _py_panic_failed(&self, exc: PyBaseExceptionRef, msg: &str) -> ! {
-        #[cfg(not(all(target_arch = "wasm32", not(target_os = "wasi"))))]
+        #[cfg(not(all(
+            target_arch = "wasm32",
+            not(any(target_os = "emscripten", target_os = "wasi")),
+        )))]
         {
             self.print_exception(exc);
             self.flush_std();
             panic!("{msg}")
         }
-        #[cfg(all(target_arch = "wasm32", not(target_os = "wasi")))]
+        #[cfg(all(
+            target_arch = "wasm32",
+            feature = "wasmbind",
+            not(any(target_os = "emscripten", target_os = "wasi")),
+        ))]
+        #[cfg(all(target_arch = "wasm32", not(target_os = "wasi"), feature = "wasmbind"))]
         {
             use wasm_bindgen::prelude::*;
             #[wasm_bindgen]
@@ -31,6 +39,17 @@ impl VirtualMachine {
             self.write_exception(&mut s, &exc).unwrap();
             error(&s);
             panic!("{}; exception backtrace above", msg)
+        }
+        #[cfg(all(
+            target_arch = "wasm32",
+            not(feature = "wasmbind"),
+            not(any(target_os = "emscripten", target_os = "wasi")),
+        ))]
+        {
+            use crate::convert::ToPyObject;
+            let err_string: String = exc.to_pyobject(self).repr(self).unwrap().to_string();
+            eprintln!("{err_string}");
+            panic!("{}; python exception not available", msg)
         }
     }
 
@@ -154,6 +173,15 @@ impl VirtualMachine {
         self.get_special_method(obj, method)?
             .ok_or_else(|| self.new_attribute_error(method.as_str().to_owned()))?
             .invoke(args, self)
+    }
+
+    /// Same as __builtins__.print in Python.
+    /// A convenience function to provide a simple way to print objects for debug purpose.
+    // NOTE: Keep the interface simple.
+    pub fn print(&self, args: impl IntoFuncArgs) -> PyResult<()> {
+        let ret = self.builtins.get_attr("print", self)?.call(args, self)?;
+        debug_assert!(self.is_none(&ret));
+        Ok(())
     }
 
     #[deprecated(note = "in favor of `obj.call(args, vm)`")]

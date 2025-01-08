@@ -1,11 +1,12 @@
 [package]
 name = "rustpython-common"
-version = "0.3.1"
 description = "General python functions and algorithms for use in RustPython"
-authors = ["RustPython Team"]
-edition = "2021"
-repository = "https://github.com/RustPython/RustPython"
-license = "MIT"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
 
 [features]
 threading = ["parking_lot"]
@@ -15,7 +16,6 @@ rustpython-format = { workspace = true }
 
 ascii = { workspace = true }
 bitflags = { workspace = true }
-bstr = { workspace = true }
 cfg-if = { workspace = true }
 itertools = { workspace = true }
 libc = { workspace = true }
@@ -43,3 +43,6 @@ windows-sys = { workspace = true, features = [
     "Win32_System_LibraryLoader",
     "Win32_System_SystemServices",
 ] }
+
+[lints]
+workspace = true

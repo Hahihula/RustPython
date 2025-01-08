@@ -228,12 +228,8 @@ mod sealed {
 }
 
 /// A sealed marker trait for `DictKey` types that always become an exact instance of `str`
-pub trait InternableString
-where
-    Self: sealed::SealedInternable + ToPyObject + AsRef<Self::Interned>,
-    Self::Interned: MaybeInternedString,
-{
-    type Interned: ?Sized;
+pub trait InternableString: sealed::SealedInternable + ToPyObject + AsRef<Self::Interned> {
+    type Interned: MaybeInternedString + ?Sized;
     fn into_pyref_exact(self, str_type: PyTypeRef) -> PyRefExact<PyStr>;
 }
 
@@ -286,7 +282,7 @@ impl MaybeInternedString for Py<PyStr> {
     #[inline(always)]
     fn as_interned(&self) -> Option<&'static PyStrInterned> {
         if self.as_object().is_interned() {
-            Some(unsafe { std::mem::transmute(self) })
+            Some(unsafe { std::mem::transmute::<&Py<PyStr>, &PyInterned<PyStr>>(self) })
         } else {
             None
         }

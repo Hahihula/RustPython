@@ -4635,8 +4635,6 @@ order (MRO) for bases """
         # hash([].append) should not be based on hash([])
         hash(l.append)
 
-    # TODO: RUSTPYTHON
-    @unittest.expectedFailure
     def test_special_unbound_method_types(self):
         # Testing objects of <type 'wrapper_descriptor'>...
         self.assertTrue(list.__add__ == list.__add__)
@@ -5652,8 +5650,7 @@ class PicklingTests(unittest.TestCase):
                     objcopy2 = deepcopy(objcopy)
                     self._assert_is_copy(obj, objcopy2)
 
-    # TODO: RUSTPYTHON
-    @unittest.expectedFailure
+    @unittest.skip("TODO: RUSTPYTHON")
     def test_issue24097(self):
         # Slot name is freed inside __getattr__ and is later used.
         class S(str):  # Not interned
